@@ -1,0 +1,98 @@
+name: Create/destroy ECS infrastructure (step3)
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Choose the Terraform action to perform'
+        required: true
+        default: 'create'
+        type: choice
+        options:
+          - 'create'
+          - 'destroy'
+
+jobs:
+  step3:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set initial Terraform status
+        run: echo "STEP3_TERRAFORM_STATUS=❌ Failed" >> $GITHUB_ENV
+
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-central-1
+
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_wrapper: false
+
+      - name: Init Terraform (step3)
+        if: contains(github.event.inputs.action, 'create')
+        run: terraform init
+        working-directory: step3
+
+      - name: Plan Terraform (step3)
+        if: contains(github.event.inputs.action, 'create')
+        run: terraform plan
+        working-directory: step3
+
+      - name: Apply Terraform (step3)
+        if: contains(github.event.inputs.action, 'create')
+        id: apply_step3
+        run: terraform apply -auto-approve
+        working-directory: step3
+
+      - name: Collect status (step3)
+        if: contains(github.event.inputs.action, 'create')
+        id: collect_status_apply_step3
+        run: |
+          echo "CREATED_ALB_DNS_NAME=$(terraform output alb_dns_name)" >> $GITHUB_ENV
+          echo "STEP3_TERRAFORM_STATUS=$([[ '${{ steps.apply_step3.outcome }}' == 'success' ]] && echo '✅ Success')" >> $GITHUB_ENV
+        working-directory: step3
+
+      - name: Send Telegram Notification (step3)
+        if: contains(github.event.inputs.action, 'create')
+        uses: cbrgm/telegram-github-action@v1
+        with:
+          token: ${{ secrets.TELEGRAM_TOKEN }}
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          message: |
+            *Create ECS infrastructure (step3)*:
+            *Created ALB DNS Name*: ${{ env.CREATED_ALB_DNS_NAME }}
+            *Terraform Apply Status*: ${{ env.STEP3_TERRAFORM_STATUS }}
+        
+      - name: Init Terraform (step3 destroy)
+        if: contains(github.event.inputs.action, 'destroy')
+        run: terraform init
+        working-directory: step3
+        
+      - name: Destroy Terraform (step3 destroy)
+        if: contains(github.event.inputs.action, 'destroy')
+        id: step3_destroy
+        run: terraform destroy -auto-approve
+        working-directory: step3
+        
+      - name: Collect status (step3 destroy)
+        if: contains(github.event.inputs.action, 'destroy')
+        id: collect_status_step3_destroy
+        run: |
+          echo "STEP3_TERRAFORM_STATUS=$([[ '${{ steps.step3_destroy.outcome }}' == 'success' ]] && echo '✅ Success')" >> $GITHUB_ENV
+
+      - name: Send Telegram Notification (step3 destroy)
+        if: contains(github.event.inputs.action, 'destroy')
+        uses: cbrgm/telegram-github-action@v1
+        with:
+          token: ${{ secrets.TELEGRAM_TOKEN }}
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          message: |
+            *Destroy ECS infrastructure Result (step3 destroy)*:
+            *Terraform Destroy Status*: ${{ env.STEP3_TERRAFORM_STATUS }}
