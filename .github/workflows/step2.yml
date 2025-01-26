@@ -1,0 +1,121 @@
+name: Build/Push/Remove ECR Docker Image (step2)
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Choose the Terraform action to perform'
+        required: true
+        default: 'create'
+        type: choice
+        options:
+          - 'create'
+          - 'destroy'
+
+env:
+  AWS_REGION: "eu-central-1"
+  ECR_REPOSITORY: "wordpress-repo"
+  IMAGE_TAG: "custom"
+
+jobs:
+  step2:
+    name: Build and Push or remove Docker Image
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Set initial Terraform status
+        run: |
+          echo "DOCKER_BUILD_STATUS=❌ Failed" >> $GITHUB_ENV
+          echo "DOCKER_TAG_STATUS=❌ Failed" >> $GITHUB_ENV
+          echo "DOCKER_PUSH_STATUS=❌ Failed" >> $GITHUB_ENV
+          echo "ECR_IMAGE_REMOVE_STATUS=❌ Failed" >> $GITHUB_ENV
+
+      - name: Checkout repo
+        if: contains(github.event.inputs.action, 'create')
+        uses: actions/checkout@v4        
+
+      - name: Build Docker Image (step2)
+        if: contains(github.event.inputs.action, 'create')
+        id: docker_build_step2
+        run: |
+          docker build -t $ECR_REPOSITORY:$IMAGE_TAG ./step2  # Вказуємо шлях до step2
+
+      - name: Tag Docker Image (step2)
+        if: contains(github.event.inputs.action, 'create')
+        id: docker_tag_step2
+        run: |
+          IMAGE_URI=${{ steps.login-ecr.outputs.registry }}/$ECR_REPOSITORY:$IMAGE_TAG
+          docker tag $ECR_REPOSITORY:$IMAGE_TAG $IMAGE_URI
+          echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_ENV  # Збереження у змінну оточення
+
+      - name: Push Docker Image to ECR (step2)
+        if: contains(github.event.inputs.action, 'create')
+        id: docker_push_step2
+        run: |
+          docker push ${{ steps.login-ecr.outputs.registry }}/$ECR_REPOSITORY:$IMAGE_TAG
+
+      - name: Collect status (step2)
+        if: contains(github.event.inputs.action, 'create')
+        id: collect_status_step2
+        run: |
+          echo "DOCKER_BUILD_STATUS=$([[ '${{ steps.docker_build_step2.outcome }}' == 'success' ]] && echo '✅ Success')" >> $GITHUB_ENV
+          echo "DOCKER_TAG_STATUS=$([[ '${{ steps.docker_tag_step2.outcome }}' == 'success' ]] && echo '✅ Success')" >> $GITHUB_ENV
+          echo "DOCKER_PUSH_STATUS=$([[ '${{ steps.docker_push_step2.outcome }}' == 'success' ]] && echo '✅ Success')" >> $GITHUB_ENV
+
+      - name: Send Telegram Notification (step2)
+        if: contains(github.event.inputs.action, 'create')
+        uses: cbrgm/telegram-github-action@v1
+        with:
+          token: ${{ secrets.TELEGRAM_TOKEN }}
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          message: |
+            *Build and Push WordPress Docker Image to ECR Results (step2)*:
+            *Docker build Status*: ${{ env.DOCKER_BUILD_STATUS }}
+            *Docker tag Status*: ${{ env.DOCKER_TAG_STATUS }}
+            *Docker push Status*: ${{ env.DOCKER_PUSH_STATUS }}
+            *Image URI*: ${{ env.IMAGE_URI }}
+
+      - name: Check if ECR repository exists (step2 destroy)
+        if: contains(github.event.inputs.action, 'destroy')
+        id: check_repo
+        run: |
+          if aws ecr describe-repositories --repository-names "$ECR_REPOSITORY" > /dev/null 2>&1; then
+            echo "Repository exists"
+            echo "ECR_REPOSITORY_EXISTS=true" >> $GITHUB_ENV
+          else
+            echo "Repository does not exist"
+            echo "ECR_REPOSITORY_EXISTS=false" >> $GITHUB_ENV
+          fi
+
+      - name: Remove Docker Image from ECR (step2 destroy)
+        if: env.ECR_REPOSITORY_EXISTS == 'true' && contains(github.event.inputs.action, 'destroy')
+        id: ecr_image_remove_destroy
+        run: |
+          aws ecr batch-delete-image --repository-name $ECR_REPOSITORY --image-ids imageTag=$IMAGE_TAG
+
+      - name: Collect status (step2 destroy)
+        if: contains(github.event.inputs.action, 'destroy')
+        id: collect_status_step2_destroy
+        run: |
+          echo "ECR_IMAGE_REMOVE_STATUS=$([[ '${{ steps.ecr_image_remove_destroy.outcome }}' == 'success' ]] && echo '✅ Success' || echo '❌ Failed')" >> $GITHUB_ENV
+
+      - name: Send Telegram Notification (step2 destroy)
+        if: contains(github.event.inputs.action, 'destroy')
+        uses: cbrgm/telegram-github-action@v1
+        with:
+          token: ${{ secrets.TELEGRAM_TOKEN }}
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          message: |
+            *ECR Image remove Results (step2 destroy)*:
+            *ECR Image remove Status*: ${{ env.ECR_IMAGE_REMOVE_STATUS }}
