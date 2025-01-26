@@ -1,0 +1,108 @@
+name: Create/destroy VPC, Subnets, RDS (step1)
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Choose the Terraform action to perform'
+        required: true
+        default: 'create'
+        type: choice
+        options:
+          - 'create'
+          - 'destroy'
+
+jobs:
+  step1:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set initial Terraform status
+        run: echo "STEP1_TERRAFORM_STATUS=❌ Failed" >> $GITHUB_ENV
+
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-central-1
+
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_wrapper: false
+
+      - name: Init Terraform (step1)
+        if: contains(github.event.inputs.action, 'create')
+        run: terraform init
+        working-directory: step1
+
+      - name: Plan Terraform (step1)
+        if: contains(github.event.inputs.action, 'create')
+        run: terraform plan
+        working-directory: step1
+
+      - name: Apply Terraform (step1)
+        if: contains(github.event.inputs.action, 'create')
+        id: apply_step1
+        run: terraform apply -auto-approve
+        working-directory: step1
+
+      - name: Collect status (step1)
+        if: contains(github.event.inputs.action, 'create')
+        id: collect_status_apply_step1
+        run: |
+          echo "CREATED_VPC_ID=$(terraform output -raw created_vpc_id)" >> $GITHUB_ENV
+          echo "PUBLIC_SUBNET_ID_1=$(terraform output -raw public_subnet_id_1)" >> $GITHUB_ENV
+          echo "PUBLIC_SUBNET_ID_2=$(terraform output -raw public_subnet_id_2)" >> $GITHUB_ENV
+          echo "PRIVATE_SUBNET_ID_1=$(terraform output -raw private_subnet_id_1)" >> $GITHUB_ENV
+          echo "PRIVATE_SUBNET_ID_2=$(terraform output -raw private_subnet_id_2)" >> $GITHUB_ENV
+          echo "RDS_DB_ENDPOINT=$(terraform output -raw rds_endpoint)" >> $GITHUB_ENV
+          echo "STEP1_TERRAFORM_STATUS=$([[ '${{ steps.apply_step1.outcome }}' == 'success' ]] && echo '✅ Success')" >> $GITHUB_ENV
+        working-directory: step1
+
+      - name: Send Telegram Notification (step1)
+        if: contains(github.event.inputs.action, 'create')
+        uses: cbrgm/telegram-github-action@v1
+        with:
+          token: ${{ secrets.TELEGRAM_TOKEN }}
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          message: |
+            *Create infrastructure (VPC + Subnets + Route tables + RDS DB Results (step1)*:
+            *VPC Id*: ${{ env.CREATED_VPC_ID }}
+            *Public Subnet Id 1*: ${{ env.PUBLIC_SUBNET_ID_1 }}
+            *Public Subnet Id 2*: ${{ env.PUBLIC_SUBNET_ID_2 }}
+            *Private Subnet Id 1*: ${{ env.PRIVATE_SUBNET_ID_1 }}
+            *Private Subnet Id 2*: ${{ env.PRIVATE_SUBNET_ID_2 }}
+            *RDS Endpoint Id*: ${{ env.RDS_DB_ENDPOINT }}
+            *Terraform Apply Status*: ${{ env.STEP1_TERRAFORM_STATUS }}
+
+      - name: Init Terraform (step1 destroy)
+        if: contains(github.event.inputs.action, 'destroy')
+        run: terraform init
+        working-directory: step1
+        
+      - name: Destroy Terraform (step1 destroy)
+        if: contains(github.event.inputs.action, 'destroy')
+        id: step1_destroy
+        run: terraform destroy -auto-approve
+        working-directory: step1
+        
+      - name: Collect status (step1 destroy)
+        if: contains(github.event.inputs.action, 'destroy')
+        id: collect_status_step1_destroy
+        run: |
+          echo "STEP1_TERRAFORM_STATUS=$([[ '${{ steps.step1_destroy.outcome }}' == 'success' ]] && echo '✅ Success')" >> $GITHUB_ENV
+
+      - name: Send Telegram Notification (step1 destroy)
+        if: contains(github.event.inputs.action, 'destroy')
+        uses: cbrgm/telegram-github-action@v1
+        with:
+          token: ${{ secrets.TELEGRAM_TOKEN }}
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          message: |
+            *Destroy VPC, Subnets, RDS infrastructure Result (step1 destroy)*:
+            *Terraform Destroy Status*: ${{ env.STEP1_TERRAFORM_STATUS }}
