@@ -15,7 +15,7 @@ on:
 env:
   AWS_REGION: "eu-central-1"
   ECR_REPOSITORY: "wordpress-repo"
-  IMAGE_TAG: "custom"
+  IMAGE_TAG: "custom2"
 
 jobs:
   step4:
